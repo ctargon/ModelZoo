@@ -1,2 +1,2 @@
 # ModelPlayground
-Repository of different models that I have used for various tasks
+Repository of models that I have used for various tasks
