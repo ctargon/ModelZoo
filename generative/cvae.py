@@ -1,8 +1,8 @@
 #/usr/bin/python
 
 '''
-	This script contains the code to train and evaluate a variational autoencoder on
-	the MNIST dataset
+	This script contains the code to train and evaluate a conditional variational 
+	autoencoder on the MNIST dataset
 
 	Protypes:
 
@@ -21,8 +21,8 @@ from tensorflow.examples.tutorials.mnist import input_data
 mnist = input_data.read_data_sets('../../MNIST_data', one_hot=True)
 
 def plot(samples):
-    fig = plt.figure(figsize=(4, 4))
-    gs = gridspec.GridSpec(4, 4)
+    fig = plt.figure(figsize=(2, 5))
+    gs = gridspec.GridSpec(2, 5)
     gs.update(wspace=0.05, hspace=0.05)
 
     for i, sample in enumerate(samples):
@@ -37,13 +37,15 @@ def plot(samples):
 
 class VAE:
 	def __init__(self, latent_dim=2, lr=0.001, epochs=75, h_units=[512,512,512], \
-				batch_size=16, n_input=784, dropout=0, load=0, save=0, verbose=0):
+				batch_size=16, n_input=784, n_classes=10, dropout=0, load=0, \
+				save=0, verbose=0):
 		self.latent_dim = latent_dim
 		self.lr = lr
 		self.epochs = epochs
 		self.h_units = h_units
 		self.batch_size = batch_size
 		self.n_input = n_input
+		self.n_classes = n_classes
 		self.load = load
 		self.save = save
 		self.dropout = dropout
@@ -57,9 +59,9 @@ class VAE:
 	# PARAMS:
 	#	x: input data sample
 	#	h_hidden: LIST of num. neurons per hidden layer
-	def inference_network(self, x):
+	def inference_network(self, x, c):
 		with tf.variable_scope('encoder', reuse=tf.AUTO_REUSE):
-			layer = x
+			layer = tf.concat(axis=1, values=[x, c])
 			for n in self.h_units:
 				layer = tf.layers.dense(inputs=layer, units=n, activation=tf.nn.relu)
 
@@ -117,9 +119,9 @@ class VAE:
 	# PARAMS:
 	#	z: input latent variable
 	#	n_hidden: LIST of num. neurons per hidden layer
-	def generative_network(self, z):
+	def generative_network(self, z, c):
 		with tf.variable_scope('decoder', reuse=tf.AUTO_REUSE):
-			layer = z
+			layer = tf.concat(axis=1,values=[z, c])
 			units = self.h_units[:]
 			units.reverse()
 			for n in units:
@@ -173,15 +175,22 @@ class VAE:
 	def train(self, dataset):
 		# define placeholders for input data
 		x = tf.placeholder("float", [None, self.n_input])
+		c = tf.placeholder("float", [None, self.n_classes])
 		z = tf.placeholder(tf.float32, shape=[None, self.latent_dim])
 
-		q_mu, q_sigma = self.inference_network(x=x)
+		# # preprocess data
+		# maxabsscaler = preprocessing.MaxAbsScaler()
+		# dataset.train.data = maxabsscaler.fit_transform(dataset.train.data)
+		# dataset.test.data = maxabsscaler.fit_transform(dataset.test.data)
+
+		# first run the inference model to produce the gaussian parameters
+		q_mu, q_sigma = self.inference_network(x=x, c=c)
 
 		q_z = self.reparameterize(q_mu, q_sigma)
 
-		_, x_logit = self.generative_network(q_z)
+		_, x_logit = self.generative_network(q_z, c=c)
 
-		X_samples, _ = self.generative_network(z)
+		X_samples, _ = self.generative_network(z, c=c)
 
 		# define losses
 		recon_loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=x_logit, labels=x), axis=1)
@@ -196,7 +205,11 @@ class VAE:
 
 		saver = tf.train.Saver()
 
-		sample_z = np.random.randn(16, self.latent_dim)
+		sample_z = np.random.randn(10, self.latent_dim)
+
+		uniq_labels = np.arange(0, 10)
+		one_hot = np.zeros((10, 10))
+		one_hot[np.arange(0,10), uniq_labels] = 1
 
 		# Initializing the variables
 		init = tf.global_variables_initializer()
@@ -209,19 +222,20 @@ class VAE:
 			total_batch = int(dataset.train.num_examples/self.batch_size)
 
 			for i in range(total_batch):
-				batch_x, _ = dataset.train.next_batch(self.batch_size)
-				_, c, rcl, kll = sess.run([optimizer, loss, recon_loss, kl], feed_dict={x: batch_x})
+				batch_x, batch_y = dataset.train.next_batch(self.batch_size)
+				_, cost, rcl, kll = sess.run([optimizer, loss, recon_loss, kl], \
+											feed_dict={x: batch_x, c: batch_y})
 
-				avg_cost += c / total_batch
+				avg_cost += cost / total_batch
 
 			print("Epoch:", '%04d' % (epoch), "cost=", "{:.9f}".format(avg_cost))
 
-			samples = sess.run(X_samples, feed_dict={z: sample_z})
+			samples = sess.run(X_samples, feed_dict={z: sample_z, c: one_hot})
 			fig = plot(samples)
 			plt.savefig('out/{}.png'.format(str(epoch).zfill(3)), bbox_inches='tight')
 			plt.close(fig)
 
-		saver.save(sess, "/tmp/model.ckpt")
+			saver.save(sess, "/tmp/model.ckpt")
 		sess.close() 
 
 
@@ -245,8 +259,13 @@ class VAE:
 	# run inference on the generative network P(X | z)
 	def generate(self):
 		z = tf.placeholder(tf.float32, shape=[None, self.latent_dim])
+		c = tf.placeholder(tf.float32, shape=[None, self.n_classes])
 
-		X_samples, _ = self.generative_network(z)
+		uniq_labels = np.arange(0, 10)
+		one_hot = np.zeros((10, 10))
+		one_hot[np.arange(0,10), uniq_labels] = 1
+
+		X_samples, _ = self.generative_network(z, c)
 
 		saver = tf.train.Saver()
 
@@ -255,7 +274,8 @@ class VAE:
 		saver.restore(sess, "/tmp/model.ckpt")
 
 		#mu, sig = 
-		xsamp = sess.run(X_samples, feed_dict={z: np.random.randn(16, self.latent_dim)})
+		xsamp = sess.run(X_samples, feed_dict={z: np.random.randn(10, self.latent_dim), \
+												c: one_hot})
 
 		fig = plot(xsamp)
 		plt.savefig('out/{}.png'.format(str(0).zfill(3)), bbox_inches='tight')
