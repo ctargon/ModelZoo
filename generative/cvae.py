@@ -80,7 +80,7 @@ class VAE:
 	# PARAMS:
 	#	x: input data sample
 	#	h_hidden: LIST of num. neurons per hidden layer
-	def inference_convnet(self, x):
+	def inference_convnet(self, x, c):
 		with tf.variable_scope('encoder', reuse=tf.AUTO_REUSE):
 			input_layer = tf.reshape(x, [-1, 28, 28, 1])
 
@@ -104,7 +104,9 @@ class VAE:
 
 			pool2_flat = tf.reshape(pool2, [-1, 7 * 7 * 64])
 
-			gaussian_params = tf.layers.dense(inputs=pool2_flat, units=self.latent_dim * 2, activation=None)
+			flat = tf.concat([pool2_flat, c], axis=1)
+
+			gaussian_params = tf.layers.dense(inputs=flat, units=self.latent_dim * 2, activation=None)
 
 			mu = gaussian_params[:, :self.latent_dim]
 
@@ -139,9 +141,10 @@ class VAE:
 	# PARAMS:
 	#	z: input latent variable
 	#	n_hidden: LIST of num. neurons per hidden layer
-	def generative_convnet(self, z):
+	def generative_convnet(self, z, c):
 		with tf.variable_scope('decoder', reuse=tf.AUTO_REUSE):
-			layer = tf.layers.dense(inputs=z, units=7*7*32, activation=tf.nn.relu)
+			layer = tf.concat([z, c], axis=1)
+			layer = tf.layers.dense(inputs=layer, units=7*7*32, activation=tf.nn.relu)
 
 			layer_reshape = tf.reshape(layer, [-1, 7, 7, 32])
 
@@ -178,19 +181,13 @@ class VAE:
 		c = tf.placeholder("float", [None, self.n_classes])
 		z = tf.placeholder(tf.float32, shape=[None, self.latent_dim])
 
-		# # preprocess data
-		# maxabsscaler = preprocessing.MaxAbsScaler()
-		# dataset.train.data = maxabsscaler.fit_transform(dataset.train.data)
-		# dataset.test.data = maxabsscaler.fit_transform(dataset.test.data)
-
-		# first run the inference model to produce the gaussian parameters
-		q_mu, q_sigma = self.inference_network(x=x, c=c)
+		q_mu, q_sigma = self.inference_convnet(x=x, c=c)
 
 		q_z = self.reparameterize(q_mu, q_sigma)
 
-		_, x_logit = self.generative_network(q_z, c=c)
+		_, x_logit = self.generative_convnet(q_z, c=c)
 
-		X_samples, _ = self.generative_network(z, c=c)
+		X_samples, _ = self.generative_convnet(z, c=c)
 
 		# define losses
 		recon_loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=x_logit, labels=x), axis=1)
@@ -240,16 +237,18 @@ class VAE:
 
 
 	# run inference on the inference network Q(z | X)
-	def infer(self, data):
+	def infer(self, data, labels):
 		x = tf.placeholder("float", [None, self.n_input])
-		q_mu, q_sigma = self.inference_network(x=x)
+		c = tf.placeholder(tf.float32, shape=[None, self.n_classes])
+
+		q_mu, q_sigma = self.inference_convnet(x=x, c=c)
 
 		saver = tf.train.Saver()
 
 		sess = tf.Session()
 		saver.restore(sess, "/tmp/model.ckpt")
 
-		mu, sig = sess.run([q_mu, q_sigma], feed_dict={x: data})
+		mu, sig = sess.run([q_mu, q_sigma], feed_dict={x: data, c: labels})
 
 		sess.close()
 
@@ -265,7 +264,7 @@ class VAE:
 		one_hot = np.zeros((10, 10))
 		one_hot[np.arange(0,10), uniq_labels] = 1
 
-		X_samples, _ = self.generative_network(z, c)
+		X_samples, _ = self.generative_convnet(z, c)
 
 		saver = tf.train.Saver()
 
