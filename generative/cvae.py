@@ -18,8 +18,6 @@ import os
 from tensorflow.examples.tutorials.mnist import input_data
 
 
-mnist = input_data.read_data_sets('../../MNIST_data', one_hot=True)
-
 def plot(samples):
     fig = plt.figure(figsize=(2, 5))
     gs = gridspec.GridSpec(2, 5)
@@ -34,6 +32,7 @@ def plot(samples):
         plt.imshow(sample.reshape(28, 28), cmap='Greys_r')
 
     return fig
+
 
 class VAE:
 	def __init__(self, latent_dim=2, lr=0.001, epochs=75, h_units=[512,512,512], \
@@ -283,8 +282,9 @@ class VAE:
 		sess.close()
 
 
+mnist = input_data.read_data_sets('../../MNIST_data', one_hot=True)
 vae = VAE(epochs=30, batch_size=64, h_units=[512, 256, 64], n_input=784, latent_dim=20)
-
+vae.train(mnist)
 
 
 
