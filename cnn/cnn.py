@@ -150,7 +150,7 @@ class CNN:
 
         accs = []
 
-        total_test_batch = int(dataset.test.num_examples / 8192)
+        total_test_batch = int(dataset.test.num_examples / self.batch_size)
         for i in range(total_test_batch):
             batch_x, batch_y = dataset.test.next_batch(self.batch_size, i)
             #batch_x = dataset.train.permute(batch_x, idxs)
